@@ -99,6 +99,12 @@
     <div class="sector nodata"><div class="lab">右 +30°</div><div class="val">—</div><div class="unit">m</div><div class="bar"></div></div>
   </div>
 
+  <div class="memory" id="dynMain">
+    <div class="arrow">◇</div>
+    <div><div class="title">接近体(衝突予測)</div><div class="msg">接近体なし</div></div>
+    <div class="count">0 追跡</div>
+  </div>
+
   <div class="memory" id="gapMain">
     <div class="arrow">⇧</div>
     <div><div class="title">通過判定(正面の開口)</div><div class="msg">—</div></div>
@@ -127,6 +133,7 @@
     <button class="tog on" id="setEANM">符号: E·A·N·M</button>
     <button class="tog" id="setSKOB">符号: S·K·O·B</button>
     <button class="tog on" id="togND">無データ通知: ON</button>
+    <button class="tog on" id="togDYN">接近予測: ON</button>
   </div>
   <div class="row" style="align-items:center">
     <button class="tog on" id="togPASS">通過可通知: ON</button>
@@ -180,6 +187,7 @@
       いずれも視野内=速いリズム、記憶警告(視野外)=単位長2倍の遅い質感。近いほど繰り返しが速くなります。<br>
       <b>無データ通知</b>: 深度が約1.5秒以上取得できないとき、ゆっくりした ・・・・(H)を約2秒間隔で提示。「安全(無刺激)」と「計測不能」を弁別可能にします。ON/OFF切替で有無の比較実験ができます。<br>
       <b>通過判定</b>: 前方2.2m以内の正面開口を検出し、幅を肩幅×1.3と比較。「通過可」時は約2.5秒間隔で ・・(I)の確認パルス(ON/OFF切替可)。判定は視野±35°・中央高さ帯のみが対象で、足元の段差や頭上の張り出しは検知できません。<b>白杖の代替ではなく併用が前提</b>で、進行の最終判断は使用者に委ねられます。<br>
+      <b>接近予測</b>: 深度+SLAMで動く物体(人・自転車等、分類はせず「動体」として)を追跡し、相対速度から衝突時間(TTC)と最接近距離を推定。TTC 4秒以内かつ最接近1m以内の接近体を、該当方向の符号<b>2連続</b>(切迫の質感)で最優先警告します。ON/OFF切替可。<br>
       <b>信号モード</b>(深度計測とは排他・立ち止まって使用): 信号機を検出し、約1.3秒の連続一致で判定を確定。<b>「赤」のみ強い3連振動で積極通知</b>し、「赤以外」は表示のみで青の確定・横断可否の判断は行いません。逆光・LEDフリッカー等で誤認し得るため、横断判断は必ず音響信号・周囲の状況・ご自身の判断によってください。<br>
       音モード: 方向を左右パン、距離を音高(近い=高音)で提示。骨伝導イヤホン推奨。弁別テスト中はパン・音高の手掛かりを消して符号のみで判定します。<br>
       動作条件: Android + Chrome、ARCore対応機、https配信。ホーム画面に追加すると全画面アプリとして起動できます。
@@ -193,6 +201,11 @@
 
 <div id="hud">
   <div class="sectors" id="sectorsHud"></div>
+  <div class="memory" id="dynHud">
+    <div class="arrow">◇</div>
+    <div><div class="title">接近体</div><div class="msg">接近体なし</div></div>
+    <div class="count">0 追跡</div>
+  </div>
   <div class="memory" id="gapHud">
     <div class="arrow">⇧</div>
     <div><div class="title">通過判定</div><div class="msg">—</div></div>
@@ -325,6 +338,18 @@ async function feedbackLoop(){
   if (fbRunning) return;
   fbRunning = true;
   while (fbRunning){
+    /* 最優先: 接近体警告(方向符号を2連続=切迫の質感、TTCで間隔短縮) */
+    const dw = dynWarn;
+    if (dw && performance.now() - lastDynAt > (dw.ttc < 1.5 ? 500 : 1000)){
+      const code = dw.dir === "C" ? liveCode("C") : liveCode(dw.dir);
+      await playCode(code, UNIT_MS, dw.dir, dw.dist);
+      await sleep(UNIT_MS);
+      await playCode(code, UNIT_MS, dw.dir, dw.dist);
+      logEvent("dyn", dw.dir, dw.dist, Math.round(dw.ttc * 1000));
+      lastDynAt = performance.now();
+      await sleep(150);
+      continue;
+    }
     const d = Math.min(latest.L, latest.C, latest.R);
     const live = d < FAR_M;
     if (live){
@@ -396,11 +421,17 @@ $("btnWalkCSV").onclick = () => {
 
 $("btnTest").onclick = async () => {
   if (sndOn && !audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  log(`テスト(${codeSet}): 左→正面→右→後方→通過可→無データ通知`);
-  for (const [dir, unit] of [["L",UNIT_MS],["C",UNIT_MS],["R",UNIT_MS],["B",MEM_UNIT_MS],["PASS",UNIT_MS],["ND",MEM_UNIT_MS]]){
-    const code = dir === "ND" ? NODATA_CODE : dir === "PASS" ? PASS_CODE : liveCode(dir);
-    await playCode(code, unit, (dir === "ND" || dir === "PASS") ? "C" : dir, 1.2,
-                   dir === "ND" || dir === "PASS");
+  log(`テスト(${codeSet}): 左→正面→右→後方→接近(2連)→通過可→無データ通知`);
+  for (const [dir, unit] of [["L",UNIT_MS],["C",UNIT_MS],["R",UNIT_MS],["B",MEM_UNIT_MS],["DYN",UNIT_MS],["PASS",UNIT_MS],["ND",MEM_UNIT_MS]]){
+    if (dir === "DYN"){   // 接近警告: 正面符号の2連続
+      await playCode(liveCode("C"), unit, "C", 1.2);
+      await sleep(UNIT_MS);
+      await playCode(liveCode("C"), unit, "C", 1.2);
+    }else{
+      const code = dir === "ND" ? NODATA_CODE : dir === "PASS" ? PASS_CODE : liveCode(dir);
+      await playCode(code, unit, (dir === "ND" || dir === "PASS") ? "C" : dir, 1.2,
+                     dir === "ND" || dir === "PASS");
+    }
     await sleep(500);
   }
 };
@@ -491,7 +522,99 @@ async function maybePassPulse(){
   logEvent("pass", "C", gapState.width, UNIT_MS);
 }
 
-/* ---------- 障害物記憶(SLAM世界座標) ---------- */
+/* ---------- 接近体の追跡と衝突予測(段階2) ----------
+   深度+SLAMのみで動く物体を追跡(セッション中カメラ画像は読めないため
+   「人」の分類はせず、接近する動体として扱う)。
+   世界座標での物体速度と自機速度から相対運動を求め、
+   衝突時間(TTC)と最接近距離を推定。TTC<4秒かつ最接近<1mで警告。 */
+const DYN_DETECT_M = 3.5;   // 追跡対象とする距離
+const DYN_GATE = 1.0;       // フレーム間対応付けの距離ゲート[m]
+const DYN_MIN_SPEED = 0.35; // これ以上動けば「動体」[m/s]
+const DYN_MIN_OBS = 4;      // 速度推定に必要な最小観測回数
+const DYN_TTC_WARN = 4.0;   // 警告するTTC上限[s]
+const DYN_MISS_M = 1.0;     // 警告する最接近距離[m]
+const DYN_STALE_MS = 1200;
+let dynOn = true, dynTracks = [], dynWarn = null;
+let devPrev = null, devVel = { x:0, y:0, z:0 };
+let lastDynAt = 0;
+
+$("togDYN").onclick = e => {
+  dynOn = !dynOn;
+  e.target.classList.toggle("on", dynOn);
+  e.target.textContent = "接近予測: " + (dynOn ? "ON" : "OFF");
+  if (!dynOn){ dynTracks = []; dynWarn = null; paintDyn(); }
+  logEvent("dyn_toggle", "-", NO_DATA, 0);
+};
+
+function updateDyn(pts, dev, view){
+  const now = performance.now();
+  for (const tr of dynTracks) tr.matched = false;
+  for (const p of pts){
+    let best = null, bd = DYN_GATE;
+    for (const tr of dynTracks){
+      if (tr.matched) continue;
+      const d = Math.hypot(tr.x-p.x, tr.y-p.y, tr.z-p.z);
+      if (d < bd){ bd = d; best = tr; }
+    }
+    if (best){
+      const dts = (p.t - best.t) / 1000;
+      if (dts > 0.005){
+        best.vx = 0.6*best.vx + 0.4*(p.x-best.x)/dts;
+        best.vy = 0.6*best.vy + 0.4*(p.y-best.y)/dts;
+        best.vz = 0.6*best.vz + 0.4*(p.z-best.z)/dts;
+      }
+      best.x = p.x; best.y = p.y; best.z = p.z; best.t = p.t;
+      best.matched = true; best.n++;
+    }else if (dynTracks.length < 6){
+      dynTracks.push({ ...p, vx:0, vy:0, vz:0, n:1, matched:true });
+    }
+  }
+  dynTracks = dynTracks.filter(tr => now - tr.t < DYN_STALE_MS);
+
+  let worst = null;
+  const inv = view.transform.inverse.matrix;
+  for (const tr of dynTracks){
+    const sp = Math.hypot(tr.vx, tr.vy, tr.vz);
+    if (tr.n < DYN_MIN_OBS || sp < DYN_MIN_SPEED) continue;
+    /* 動体の近傍にできた静的記憶は残像なので消す */
+    for (let i = obstacles.length-1; i >= 0; i--)
+      if (Math.hypot(obstacles[i].x-tr.x, obstacles[i].y-tr.y, obstacles[i].z-tr.z) < MEM_MERGE_M)
+        obstacles.splice(i, 1);
+    const rx = tr.x-dev.x, ry = tr.y-dev.y, rz = tr.z-dev.z;
+    const vx = tr.vx-devVel.x, vy = tr.vy-devVel.y, vz = tr.vz-devVel.z;
+    const rmag = Math.hypot(rx, ry, rz);
+    const closing = -(rx*vx + ry*vy + rz*vz) / (rmag || 1e-6);
+    if (closing < 0.2) continue;               // 接近していない
+    const ttc = rmag / closing;
+    if (ttc > DYN_TTC_WARN) continue;
+    const vmag = Math.hypot(vx, vy, vz);
+    const along = (rx*vx + ry*vy + rz*vz) / (vmag || 1e-6);
+    const miss = Math.sqrt(Math.max(0, rmag*rmag - along*along));
+    if (miss > DYN_MISS_M) continue;           // すれ違いコース
+    /* 方向(視点座標系のベアリング) */
+    const xv = inv[0]*tr.x + inv[4]*tr.y + inv[8]*tr.z + inv[12];
+    const zv = inv[2]*tr.x + inv[6]*tr.y + inv[10]*tr.z + inv[14];
+    const bearing = Math.atan2(xv, -zv) * 180/Math.PI;
+    const dir = Math.abs(bearing) > 120 ? "B" : Math.abs(bearing) < 20 ? "C" : (bearing > 0 ? "R" : "L");
+    if (!worst || ttc < worst.ttc) worst = { ttc, dist: rmag, dir };
+  }
+  return worst;
+}
+
+function paintDyn(){
+  for (const id of ["dynMain","dynHud"]){
+    const el = $(id);
+    el.classList.toggle("active", !!dynWarn);
+    el.querySelector(".arrow").textContent = dynWarn ? ({L:"◀",C:"⚠",R:"▶",B:"⟲"})[dynWarn.dir] : "◇";
+    el.querySelector(".msg").innerHTML = dynWarn
+      ? `${DIRJA_D[dynWarn.dir]}から接近 <b>${dynWarn.dist.toFixed(1)}m / TTC ${dynWarn.ttc.toFixed(1)}s</b>`
+      : "接近体なし";
+    el.querySelector(".count").textContent = dynTracks.length + " 追跡";
+  }
+}
+const DIRJA_D = { L:"左", C:"正面", R:"右", B:"後方" };
+
+
 const obstacles = [];
 
 function unproject(view, u, v, d){
@@ -568,6 +691,9 @@ $("btnAR").onclick = async () => {
       logEvent("session_end", "-", NO_DATA, 0);
       gapState = { st:"--", width:0, dir:"C" };
       paintGap();
+      dynTracks = []; dynWarn = null; devPrev = null;
+      devVel = { x:0, y:0, z:0 };
+      paintDyn();
       latest = { L:NO_DATA, C:NO_DATA, R:NO_DATA };
       memWarn = null;
       setXR(false, "終了");
@@ -582,13 +708,38 @@ $("btnAR").onclick = async () => {
       const view = pose.views[0];
       const depth = frame.getDepthInformation(view);
       if (!depth) return;
-      const { L, C, R, closest } = measureSectors(depth);
+      const { L, C, R, closests } = measureSectors(depth);
       latest = { L, C, R };
       lastFrameAt = performance.now();
       if (L >= NO_DATA && C >= NO_DATA && R >= NO_DATA){
         if (!noDataSince) noDataSince = lastFrameAt;
       } else noDataSince = null;
-      if (closest && closest.d < MEM_DETECT_M) remember(unproject(view, closest.u, closest.v, closest.d));
+      const cC = closests.C;
+      if (cC && cC.d < MEM_DETECT_M) remember(unproject(view, cC.u, cC.v, cC.d));
+      /* 接近体追跡: 各セクター最近接点(3.5m以内)を世界座標で追う */
+      if (dynOn){
+        const pts = [];
+        for (const k of ["L","C","R"]){
+          const c = closests[k];
+          if (c && c.d < DYN_DETECT_M){
+            const p = unproject(view, c.u, c.v, c.d);
+            p.t = lastFrameAt;
+            pts.push(p);
+          }
+        }
+        const dev = { x: view.transform.matrix[12], y: view.transform.matrix[13], z: view.transform.matrix[14] };
+        if (devPrev){
+          const dts = (lastFrameAt - devPrev.t) / 1000;
+          if (dts > 0.005){
+            devVel.x = 0.7*devVel.x + 0.3*(dev.x - devPrev.x)/dts;
+            devVel.y = 0.7*devVel.y + 0.3*(dev.y - devPrev.y)/dts;
+            devVel.z = 0.7*devVel.z + 0.3*(dev.z - devPrev.z)/dts;
+          }
+        }
+        devPrev = { ...dev, t: lastFrameAt };
+        dynWarn = updateDyn(pts, dev, view);
+        paintDyn();
+      }
       memWarn = checkMemory(view);
       gapState = computeGap(depth, view);
       paintGap();
@@ -615,7 +766,7 @@ function setXR(ok,msg){ $("dotXR").className="dot "+(ok?"on":"err"); $("stXR").t
 
 function measureSectors(depth){
   const bands = [["L",0,.33],["C",.33,.67],["R",.67,1]];
-  const out = {}; let closest = null;
+  const out = {}; const closests = { L:null, C:null, R:null };
   for (const [key,x0,x1] of bands){
     const samples = [];
     for (let iy = 0; iy < 8; iy++){
@@ -626,7 +777,7 @@ function measureSectors(depth){
           const d = depth.getDepthInMeters(u, v);
           if (d > 0.05 && d < 20){
             samples.push(d);
-            if (key === "C" && (!closest || d < closest.d)) closest = {u, v, d};
+            if (!closests[key] || d < closests[key].d) closests[key] = {u, v, d};
           }
         }catch(_){}
       }
@@ -635,7 +786,7 @@ function measureSectors(depth){
     samples.sort((a,b) => a-b);
     out[key] = Math.min(samples[Math.floor(samples.length*0.05)], NO_DATA);
   }
-  return { L:out.L, C:out.C, R:out.R, closest };
+  return { L:out.L, C:out.C, R:out.R, closests };
 }
 
 /* ---------- 符号セット切替 ---------- */
