@@ -66,6 +66,10 @@
   .ans{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:4px 0 10px}
   .ans button{padding:18px 8px;font-size:16px}
   .ans .code{display:block;font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:3px;letter-spacing:.1em}
+  input[type=number]{appearance:none;border:1px solid var(--line);border-radius:9px;
+    background:var(--panel);color:var(--ink);font-family:var(--mono);font-size:14px;
+    padding:10px;width:70px;flex:none}
+  .sig{font-size:24px;font-weight:700;text-align:center;padding:14px 8px 6px}
 
   details{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
   summary{font-size:13px;color:var(--dim);cursor:pointer}
@@ -95,6 +99,12 @@
     <div class="sector nodata"><div class="lab">右 +30°</div><div class="val">—</div><div class="unit">m</div><div class="bar"></div></div>
   </div>
 
+  <div class="memory" id="gapMain">
+    <div class="arrow">⇧</div>
+    <div><div class="title">通過判定(正面の開口)</div><div class="msg">—</div></div>
+    <div class="count">— m</div>
+  </div>
+
   <div class="memory" id="memMain">
     <div class="arrow">◇</div>
     <div><div class="title">障害物記憶(視野外)</div><div class="msg">警告なし</div></div>
@@ -118,8 +128,22 @@
     <button class="tog" id="setSKOB">符号: S·K·O·B</button>
     <button class="tog on" id="togND">無データ通知: ON</button>
   </div>
+  <div class="row" style="align-items:center">
+    <button class="tog on" id="togPASS">通過可通知: ON</button>
+    <label style="font-size:12px;color:var(--dim);flex:none">肩幅</label>
+    <input type="number" id="shoulder" value="45" min="30" max="70" step="1">
+    <span style="font-size:12px;color:var(--dim);flex:none">cm(×1.3の余裕で判定)</span>
+  </div>
   <div class="row">
     <button class="primary" id="btnAR">計測を開始</button>
+    <button id="btnSIG">信号モード</button>
+  </div>
+
+  <div id="sigPanel" style="display:none">
+    <video id="sigVideo" playsinline muted style="width:100%;border-radius:10px;border:1px solid var(--line);background:#000"></video>
+    <div class="sig" id="sigStatus">—</div>
+    <div class="note" id="sigNote" style="text-align:center"></div>
+    <div class="row" style="margin-top:8px"><button class="stop" id="btnSigStop">信号モード終了</button></div>
   </div>
 
   <details>
@@ -155,6 +179,8 @@
       符号セット <b>S·K·O·B</b>(対称案): 左=・・・(S) 正面=−・−(K) 右=−−−(O) 後方=−・・・(B)。<br>
       いずれも視野内=速いリズム、記憶警告(視野外)=単位長2倍の遅い質感。近いほど繰り返しが速くなります。<br>
       <b>無データ通知</b>: 深度が約1.5秒以上取得できないとき、ゆっくりした ・・・・(H)を約2秒間隔で提示。「安全(無刺激)」と「計測不能」を弁別可能にします。ON/OFF切替で有無の比較実験ができます。<br>
+      <b>通過判定</b>: 前方2.2m以内の正面開口を検出し、幅を肩幅×1.3と比較。「通過可」時は約2.5秒間隔で ・・(I)の確認パルス(ON/OFF切替可)。判定は視野±35°・中央高さ帯のみが対象で、足元の段差や頭上の張り出しは検知できません。<b>白杖の代替ではなく併用が前提</b>で、進行の最終判断は使用者に委ねられます。<br>
+      <b>信号モード</b>(深度計測とは排他・立ち止まって使用): 信号機を検出し、約1.3秒の連続一致で判定を確定。<b>「赤」のみ強い3連振動で積極通知</b>し、「赤以外」は表示のみで青の確定・横断可否の判断は行いません。逆光・LEDフリッカー等で誤認し得るため、横断判断は必ず音響信号・周囲の状況・ご自身の判断によってください。<br>
       音モード: 方向を左右パン、距離を音高(近い=高音)で提示。骨伝導イヤホン推奨。弁別テスト中はパン・音高の手掛かりを消して符号のみで判定します。<br>
       動作条件: Android + Chrome、ARCore対応機、https配信。ホーム画面に追加すると全画面アプリとして起動できます。
     </div>
@@ -167,6 +193,11 @@
 
 <div id="hud">
   <div class="sectors" id="sectorsHud"></div>
+  <div class="memory" id="gapHud">
+    <div class="arrow">⇧</div>
+    <div><div class="title">通過判定</div><div class="msg">—</div></div>
+    <div class="count">— m</div>
+  </div>
   <div class="memory" id="memHud">
     <div class="arrow">◇</div>
     <div><div class="title">障害物記憶</div><div class="msg">警告なし</div></div>
@@ -305,6 +336,7 @@ async function feedbackLoop(){
       else if (d < MID_M) gap = 150 + (d-NEAR_M)/(MID_M-NEAR_M)*350;
       else gap = 500 + (d-MID_M)/(FAR_M-MID_M)*700;
       await sleep(gap);
+      if (d > NEAR_M) await maybePassPulse();   // 側方に障害があっても正面開口があれば確認パルス
     }
     const w = memWarn;
     if (w){
@@ -314,6 +346,7 @@ async function feedbackLoop(){
       await sleep(w.dist < 1.5 ? 400 : 900);
     }
     if (!live && !w){
+      await maybePassPulse();
       const now = performance.now();
       const stale = xrSession && now - lastFrameAt > NODATA_AFTER_MS;
       const persist = noDataSince && now - noDataSince > NODATA_AFTER_MS;
@@ -363,13 +396,100 @@ $("btnWalkCSV").onclick = () => {
 
 $("btnTest").onclick = async () => {
   if (sndOn && !audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  log(`テスト(${codeSet}): 左→正面→右→後方→無データ通知`);
-  for (const [dir, unit] of [["L",UNIT_MS],["C",UNIT_MS],["R",UNIT_MS],["B",MEM_UNIT_MS],["ND",MEM_UNIT_MS]]){
-    await playCode(dir === "ND" ? NODATA_CODE : liveCode(dir), unit,
-                   dir === "ND" ? "C" : dir, 1.2, dir === "ND");
+  log(`テスト(${codeSet}): 左→正面→右→後方→通過可→無データ通知`);
+  for (const [dir, unit] of [["L",UNIT_MS],["C",UNIT_MS],["R",UNIT_MS],["B",MEM_UNIT_MS],["PASS",UNIT_MS],["ND",MEM_UNIT_MS]]){
+    const code = dir === "ND" ? NODATA_CODE : dir === "PASS" ? PASS_CODE : liveCode(dir);
+    await playCode(code, unit, (dir === "ND" || dir === "PASS") ? "C" : dir, 1.2,
+                   dir === "ND" || dir === "PASS");
     await sleep(500);
   }
 };
+
+/* ---------- 通過可否判定 ----------
+   深度マップの中央高さ帯を24列に分割し、前方GAP_LOOK_M以内が
+   空いている列の最長連続区間=開口を検出。射影行列の水平画角から
+   開口の物理幅を推定し、肩幅×1.3と比較して通過可否を判定する。 */
+const GAP_COLS = 24, GAP_LOOK_M = 2.2;
+const PASS_CODE = [1,1];             // ・・(I) 通過可の確認パルス
+const PASS_REPEAT_MS = 2500;
+let passOn = true, shoulderCm = 45;
+let gapState = { st:"--", width:0, dir:"C" };
+let lastPassAt = 0, lastGapLog = 0;
+
+$("togPASS").onclick = e => {
+  passOn = !passOn;
+  e.target.classList.toggle("on", passOn);
+  e.target.textContent = "通過可通知: " + (passOn ? "ON" : "OFF");
+  logEvent("pass_toggle", "-", NO_DATA, 0);
+};
+$("shoulder").onchange = e => {
+  shoulderCm = Math.min(70, Math.max(30, parseInt(e.target.value) || 45));
+  e.target.value = shoulderCm;
+};
+
+function computeGap(depth, view){
+  const cols = [];
+  for (let i = 0; i < GAP_COLS; i++){
+    const u = (i + 0.5) / GAP_COLS;
+    let dmin = Infinity, n = 0;
+    for (let j = 0; j < 4; j++){
+      const v = 0.40 + 0.20 * (j / 3);
+      try{
+        const d = depth.getDepthInMeters(u, v);
+        if (d > 0.05 && d < 20){ dmin = Math.min(dmin, d); n++; }
+      }catch(_){}
+    }
+    cols.push(n ? dmin : NaN);
+  }
+  const free = cols.map(d => !isNaN(d) && d > GAP_LOOK_M);
+  let best = { s:-1, len:0 }, s = -1;
+  for (let i = 0; i <= GAP_COLS; i++){
+    if (i < GAP_COLS && free[i]){ if (s < 0) s = i; }
+    else { if (s >= 0 && i - s > best.len) best = { s, len: i - s }; s = -1; }
+  }
+  if (!best.len) return { st:"BLOCK", width:0, dir:"C" };
+  /* 列あたりの角度(水平画角/列数)と、開口を挟む障害物までの距離から幅を換算 */
+  const tanHalf = 1 / view.projectionMatrix[0];
+  const colAng = 2 * Math.atan(tanHalf) / GAP_COLS;
+  const leftD  = best.s > 0 ? cols[best.s - 1] : NaN;
+  const rightD = best.s + best.len < GAP_COLS ? cols[best.s + best.len] : NaN;
+  const dEdge = Math.min(isNaN(leftD) ? GAP_LOOK_M : leftD,
+                         isNaN(rightD) ? GAP_LOOK_M : rightD, GAP_LOOK_M);
+  const width = 2 * dEdge * Math.tan(colAng * best.len / 2);
+  const need = (shoulderCm / 100) * 1.3;
+  const coversCenter = best.s <= GAP_COLS/2 - 1 && best.s + best.len >= GAP_COLS/2 + 1;
+  const center = (best.s + best.len/2) / GAP_COLS;
+  if (width >= need && coversCenter) return { st:"PASS", width, dir:"C" };
+  if (width >= need) return { st:"SHIFT", width, dir: center < 0.5 ? "L" : "R" };
+  return { st:"BLOCK", width, dir:"C" };
+}
+
+const GAP_LABEL = {
+  "--":   { msg:"—", col:"var(--dim)" },
+  PASS:   { msg:"通過可", col:"var(--safe)" },
+  SHIFT:  { msg:"", col:"var(--warn)" },
+  BLOCK:  { msg:"通過不可", col:"var(--danger)" }
+};
+function paintGap(){
+  const g = gapState;
+  const lab = GAP_LABEL[g.st];
+  const msg = g.st === "SHIFT" ? (g.dir === "L" ? "左寄りに開口" : "右寄りに開口") : lab.msg;
+  for (const id of ["gapMain","gapHud"]){
+    const el = $(id);
+    el.querySelector(".msg").textContent = msg;
+    el.querySelector(".msg").style.color = lab.col;
+    el.querySelector(".arrow").textContent = g.st === "PASS" ? "⇧" : g.st === "SHIFT" ? (g.dir === "L" ? "↖" : "↗") : g.st === "BLOCK" ? "✕" : "⇧";
+    el.querySelector(".arrow").style.color = lab.col;
+    el.querySelector(".count").textContent = g.width > 0 ? g.width.toFixed(2) + " m" : "— m";
+  }
+}
+async function maybePassPulse(){
+  if (!passOn || !xrSession || gapState.st !== "PASS") return;
+  if (performance.now() - lastPassAt < PASS_REPEAT_MS) return;
+  lastPassAt = performance.now();
+  await playCode(PASS_CODE, UNIT_MS, "C", GAP_LOOK_M, true);
+  logEvent("pass", "C", gapState.width, UNIT_MS);
+}
 
 /* ---------- 障害物記憶(SLAM世界座標) ---------- */
 const obstacles = [];
@@ -446,6 +566,8 @@ $("btnAR").onclick = async () => {
       document.body.classList.remove("in-ar");
       stopFeedback();
       logEvent("session_end", "-", NO_DATA, 0);
+      gapState = { st:"--", width:0, dir:"C" };
+      paintGap();
       latest = { L:NO_DATA, C:NO_DATA, R:NO_DATA };
       memWarn = null;
       setXR(false, "終了");
@@ -468,6 +590,12 @@ $("btnAR").onclick = async () => {
       } else noDataSince = null;
       if (closest && closest.d < MEM_DETECT_M) remember(unproject(view, closest.u, closest.v, closest.d));
       memWarn = checkMemory(view);
+      gapState = computeGap(depth, view);
+      paintGap();
+      if (performance.now() - lastGapLog > 1000){
+        lastGapLog = performance.now();
+        logEvent("gap_" + gapState.st, gapState.dir, gapState.width, 0);
+      }
       paintSector(0,L); paintSector(1,C); paintSector(2,R);
       paintMemory(memWarn, obstacles.length);
       fpsCount++;
@@ -612,6 +740,158 @@ $("btnTestCSV").onclick = () => {
     new Date().toISOString().slice(0,19).replace(/[:T]/g,"-") + ".csv";
   a.click();
 };
+
+/* ---------- 信号モード ----------
+   深度計測(WebXR)とは排他。停止して確認する用途専用。
+   非対称設計: 「赤」は複数フレーム一致で積極通知(強い振動)。
+   「赤以外」は表示のみで断定せず、青の確定・横断判断は行わない。 */
+const SIG_N = 8;              // 状態確定に必要な連続一致フレーム数(約1.3秒)
+const SIG_LOST_MS = 2500;     // 判定が途絶えたら探索状態へ戻す
+let sigActive = false, sigStream = null, sigDetector = null;
+let sigState = "SEARCH", sigStreak = { k:null, n:0 };
+let sigRAF = 0, sigLastDet = 0, sigLastSeen = 0, sigLastVib = 0;
+const sigCv = document.createElement("canvas");
+const sigCtx = sigCv.getContext("2d", { willReadFrequently:true });
+
+async function loadSigDetector(){
+  if (sigDetector) return;
+  let lib = null;
+  for (const u of ["https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm",
+                   "https://esm.sh/@mediapipe/tasks-vision@0.10.14"]){
+    try{ lib = await import(u); if (lib.ObjectDetector) break; lib = null; }catch(_){}
+  }
+  if (!lib) throw new Error("検出モデルを取得できません(初回はネット接続が必要)");
+  const fs = await lib.FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  sigDetector = await lib.ObjectDetector.createFromOptions(fs, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO", scoreThreshold: 0.30, maxResults: 5,
+    categoryAllowlist: ["traffic light"]
+  });
+}
+
+/* 検出枠内のHSV分析: 明るく彩度の高い画素の赤/緑比で判定 */
+function judgeColor(video, box){
+  const w = Math.max(4, Math.round(box.width)), h = Math.max(4, Math.round(box.height));
+  sigCv.width = w; sigCv.height = h;
+  sigCtx.drawImage(video, box.originX, box.originY, box.width, box.height, 0, 0, w, h);
+  const data = sigCtx.getImageData(0, 0, w, h).data;
+  let red = 0, grn = 0, bright = 0, total = 0;
+  for (let i = 0; i < data.length; i += 4){
+    const r = data[i], g = data[i+1], b = data[i+2];
+    const mx = Math.max(r,g,b), mn = Math.min(r,g,b);
+    total++;
+    if (mx < 110 || mx - mn < 40) continue;      // 暗い/無彩色は無視
+    bright++;
+    const d = mx - mn;
+    let hue;
+    if (mx === r) hue = ((g-b)/d*60 + 360) % 360;
+    else if (mx === g) hue = (b-r)/d*60 + 120;
+    else hue = (r-g)/d*60 + 240;
+    if (hue < 25 || hue > 335) red++;
+    else if (hue >= 80 && hue <= 200) grn++;
+  }
+  if (bright < total * 0.02) return "UNKNOWN";
+  if (red > grn * 1.5 && red > bright * 0.25) return "RED";
+  if (grn > red * 1.5 && grn > bright * 0.25) return "NONRED";
+  return "UNKNOWN";
+}
+
+function paintSig(streaming){
+  const st = $("sigStatus"), nt = $("sigNote");
+  if (sigState === "RED"){
+    st.textContent = "赤信号を検出";
+    st.style.color = "var(--danger)";
+    nt.textContent = "停止してください。";
+  }else if (sigState === "NONRED"){
+    st.textContent = "赤は検出されていません";
+    st.style.color = "var(--warn)";
+    nt.textContent = "青の確定ではありません。音響信号・周囲の歩行者・車の音で必ず確認してください。横断の判断はご自身で行ってください。";
+  }else{
+    st.textContent = streaming ? `信号を探しています…${sigStreak.n ? ` (判定中 ${sigStreak.n}/${SIG_N})` : ""}` : "準備中…";
+    st.style.color = "var(--dim)";
+    nt.textContent = "信号機がカメラの中央に入るようにスマホを向けてください。";
+  }
+}
+
+function sigLoop(){
+  if (!sigActive) return;
+  sigRAF = requestAnimationFrame(sigLoop);
+  const now = performance.now();
+  if (now - sigLastDet < 160) return;   // 約6Hz
+  sigLastDet = now;
+  const v = $("sigVideo");
+  if (!v.videoWidth || !sigDetector) return;
+  let judged = "SEARCH";
+  try{
+    const res = sigDetector.detectForVideo(v, now);
+    let best = null;
+    for (const d of res.detections)
+      if (!best || d.boundingBox.width * d.boundingBox.height >
+                   best.boundingBox.width * best.boundingBox.height) best = d;
+    if (best) judged = judgeColor(v, best.boundingBox);
+  }catch(_){}
+
+  if (judged === "RED" || judged === "NONRED"){
+    sigLastSeen = now;
+    if (sigStreak.k === judged) sigStreak.n++;
+    else sigStreak = { k: judged, n: 1 };
+    if (sigStreak.n >= SIG_N && sigState !== judged){
+      sigState = judged;
+      logEvent(judged === "RED" ? "signal_red" : "signal_nonred", "-", NO_DATA, 0);
+      log("信号: " + (judged === "RED" ? "赤を検出" : "赤以外(断定なし)"));
+    }
+  }else{
+    sigStreak = { k:null, n:0 };
+    if (sigState !== "SEARCH" && now - sigLastSeen > SIG_LOST_MS){
+      sigState = "SEARCH";
+      logEvent("signal_lost", "-", NO_DATA, 0);
+    }
+  }
+  /* 赤のみ積極通知: 強い3連の長い振動を約2秒間隔で(モールス符号とは別質感) */
+  if (sigState === "RED" && vibOn && vibSupported && now - sigLastVib > 2000){
+    navigator.vibrate([400,150,400,150,400]);
+    sigLastVib = now;
+  }
+  paintSig(true);
+}
+
+$("btnSIG").onclick = async () => {
+  if (sigActive) return;
+  try{
+    if (xrSession) xrSession.end();   // 深度計測とは排他
+    sigActive = true;
+    $("sigPanel").style.display = "block";
+    $("btnSIG").disabled = true;
+    sigState = "SEARCH"; sigStreak = { k:null, n:0 };
+    paintSig(false);
+    await loadSigDetector();
+    sigStream = await navigator.mediaDevices.getUserMedia(
+      { video: { facingMode: "environment", width: { ideal: 1280 } } });
+    const v = $("sigVideo");
+    v.srcObject = sigStream;
+    await v.play();
+    if (!sessionT0) sessionT0 = performance.now();
+    logEvent("signal_mode_start", "-", NO_DATA, 0);
+    sigLoop();
+  }catch(e){
+    log("信号モード: " + e.message);
+    stopSig();
+  }
+};
+function stopSig(){
+  sigActive = false;
+  cancelAnimationFrame(sigRAF);
+  if (sigStream){ sigStream.getTracks().forEach(t => t.stop()); sigStream = null; }
+  $("sigVideo").srcObject = null;
+  $("sigPanel").style.display = "none";
+  $("btnSIG").disabled = false;
+  if (sessionT0) logEvent("signal_mode_end", "-", NO_DATA, 0);
+}
+$("btnSigStop").onclick = stopSig;
 
 /* ---------- PWA ---------- */
 if ("serviceWorker" in navigator){
