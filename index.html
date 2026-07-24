@@ -70,6 +70,11 @@
     background:var(--panel);color:var(--ink);font-family:var(--mono);font-size:14px;
     padding:10px;width:70px;flex:none}
   .sig{font-size:24px;font-weight:700;text-align:center;padding:14px 8px 6px}
+  input[type=text]{appearance:none;border:1px solid var(--line);border-radius:9px;
+    background:var(--panel);color:var(--ink);font-family:var(--sans);font-size:14px;
+    padding:12px;flex:1;min-width:0}
+  .dest{display:block;width:100%;text-align:left;font-size:13px;font-weight:500;
+    margin-bottom:6px;padding:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
   details{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
   summary{font-size:13px;color:var(--dim);cursor:pointer}
@@ -127,6 +132,7 @@
   <div class="row">
     <button class="tog on" id="togVib">振動: ON</button>
     <button class="tog" id="togSnd">音: OFF</button>
+    <button class="tog on" id="togVOICE">音声: ON</button>
     <button class="tog" id="btnTest">刺激テスト</button>
   </div>
   <div class="row">
@@ -142,6 +148,21 @@
     <span style="font-size:12px;color:var(--dim);flex:none">cm(×1.3の余裕で判定)</span>
   </div>
   <div class="row">
+    <input type="text" id="destQ" placeholder="目的地を検索(例: 高崎駅)">
+    <button id="btnDestSearch" style="flex:none">検索</button>
+  </div>
+  <div id="destList"></div>
+  <div class="memory" id="navMain">
+    <div class="arrow">◎</div>
+    <div><div class="title">屋外ナビ(ドアツードア)</div><div class="msg">目的地未設定</div></div>
+    <div class="count">—</div>
+  </div>
+  <div class="row">
+    <button id="btnNavStart" disabled>屋外ナビ開始</button>
+    <button id="btnNavStop" disabled>ナビ停止</button>
+  </div>
+
+  <div class="row">
     <button class="primary" id="btnAR">計測を開始</button>
     <button id="btnSIG">信号モード</button>
   </div>
@@ -150,7 +171,10 @@
     <video id="sigVideo" playsinline muted style="width:100%;border-radius:10px;border:1px solid var(--line);background:#000"></video>
     <div class="sig" id="sigStatus">—</div>
     <div class="note" id="sigNote" style="text-align:center"></div>
-    <div class="row" style="margin-top:8px"><button class="stop" id="btnSigStop">信号モード終了</button></div>
+    <div class="row" style="margin-top:8px">
+      <button class="tog" id="togTENJI">点字ブロック探索: OFF</button>
+      <button class="stop" id="btnSigStop">終了</button>
+    </div>
   </div>
 
   <details>
@@ -188,6 +212,9 @@
       <b>無データ通知</b>: 深度が約1.5秒以上取得できないとき、ゆっくりした ・・・・(H)を約2秒間隔で提示。「安全(無刺激)」と「計測不能」を弁別可能にします。ON/OFF切替で有無の比較実験ができます。<br>
       <b>通過判定</b>: 前方2.2m以内の正面開口を検出し、幅を肩幅×1.3と比較。「通過可」時は約2.5秒間隔で ・・(I)の確認パルス(ON/OFF切替可)。判定は視野±35°・中央高さ帯のみが対象で、足元の段差や頭上の張り出しは検知できません。<b>白杖の代替ではなく併用が前提</b>で、進行の最終判断は使用者に委ねられます。<br>
       <b>接近予測</b>: 深度+SLAMで動く物体(人・自転車等、分類はせず「動体」として)を追跡し、相対速度から衝突時間(TTC)と最接近距離を推定。TTC 4秒以内かつ最接近1m以内の接近体を、該当方向の符号<b>2連続</b>(切迫の質感)で最優先警告します。ON/OFF切替可。<br>
+      <b>音声出力(注意調停)</b>: 振動モールス(反射的・連続)と音声(認知的・イベント駆動)の二重モダリティ。複数の危険情報が同時発生した場合、調停器が優先度(停止>接近体>障害物>信号赤>通過不可>ナビ>通過可>計測不能)で<b>最も切迫した1つだけ</b>を短い音声で出力します(「止まってください」「右物体」「通過できます」「赤です」等)。状態の変化時のみ発話し、低優先の発話は高優先に割り込まれます。<br>
+      <b>屋外ナビ</b>: 目的地を検索(OpenStreetMap)→歩行者経路を計算。案内は方向符号と独立のモールス文字(遅い質感): <b>左折=L(・−・・) 右折=R(・−・) 逸脱=X(−・・−)+修正方向 到着=AR(・−・−・)</b>。交差点は35m手前で予告、12mで2連提示、経路から18m以上外れると逸脱警告と修正方向を提示。深度計測と同時使用可(障害物警告が常に優先)。GPS精度±10m程度の限界があり、横断のタイミング等は判断しません。<br>
+      <b>点字ブロック探索</b>(信号モード内): 足元前方の黄色誘導ブロックを検出し方向を提示。到着後の「最後の10m」用の簡易機能です。<br>
       <b>信号モード</b>(深度計測とは排他・立ち止まって使用): 信号機を検出し、約1.3秒の連続一致で判定を確定。<b>「赤」のみ強い3連振動で積極通知</b>し、「赤以外」は表示のみで青の確定・横断可否の判断は行いません。逆光・LEDフリッカー等で誤認し得るため、横断判断は必ず音響信号・周囲の状況・ご自身の判断によってください。<br>
       音モード: 方向を左右パン、距離を音高(近い=高音)で提示。骨伝導イヤホン推奨。弁別テスト中はパン・音高の手掛かりを消して符号のみで判定します。<br>
       動作条件: Android + Chrome、ARCore対応機、https配信。ホーム画面に追加すると全画面アプリとして起動できます。
@@ -210,6 +237,11 @@
     <div class="arrow">⇧</div>
     <div><div class="title">通過判定</div><div class="msg">—</div></div>
     <div class="count">— m</div>
+  </div>
+  <div class="memory" id="navHud">
+    <div class="arrow">◎</div>
+    <div><div class="title">屋外ナビ</div><div class="msg">目的地未設定</div></div>
+    <div class="count">—</div>
   </div>
   <div class="memory" id="memHud">
     <div class="arrow">◇</div>
@@ -347,6 +379,12 @@ async function feedbackLoop(){
       await playCode(code, UNIT_MS, dw.dir, dw.dist);
       logEvent("dyn", dw.dir, dw.dist, Math.round(dw.ttc * 1000));
       lastDynAt = performance.now();
+      await sleep(150);
+      continue;
+    }
+    if (navCue){
+      const c = navCue; navCue = null;
+      await playCue(c);
       await sleep(150);
       continue;
     }
@@ -900,7 +938,7 @@ const SIG_N = 8;              // 状態確定に必要な連続一致フレー�
 const SIG_LOST_MS = 2500;     // 判定が途絶えたら探索状態へ戻す
 let sigActive = false, sigStream = null, sigDetector = null;
 let sigState = "SEARCH", sigStreak = { k:null, n:0 };
-let sigRAF = 0, sigLastDet = 0, sigLastSeen = 0, sigLastVib = 0;
+let sigRAF = 0, sigLastDet = 0, sigLastSeen = 0, sigLastVib = 0, sigLastVoice = 0;
 const sigCv = document.createElement("canvas");
 const sigCtx = sigCv.getContext("2d", { willReadFrequently:true });
 
@@ -975,7 +1013,9 @@ function sigLoop(){
   if (now - sigLastDet < 160) return;   // 約6Hz
   sigLastDet = now;
   const v = $("sigVideo");
-  if (!v.videoWidth || !sigDetector) return;
+  if (!v.videoWidth) return;
+  if (sigMode === "tenji"){ tenjiLoop(v, now); return; }
+  if (!sigDetector) return;
   let judged = "SEARCH";
   try{
     const res = sigDetector.detectForVideo(v, now);
@@ -994,6 +1034,8 @@ function sigLoop(){
       sigState = judged;
       logEvent(judged === "RED" ? "signal_red" : "signal_nonred", "-", NO_DATA, 0);
       log("信号: " + (judged === "RED" ? "赤を検出" : "赤以外(断定なし)"));
+      speak(judged === "RED" ? "赤です" : "赤は見えません。ご自身で確認してください",
+            judged === "RED" ? 95 : 60);
     }
   }else{
     sigStreak = { k:null, n:0 };
@@ -1003,8 +1045,9 @@ function sigLoop(){
     }
   }
   /* 赤のみ積極通知: 強い3連の長い振動を約2秒間隔で(モールス符号とは別質感) */
-  if (sigState === "RED" && vibOn && vibSupported && now - sigLastVib > 2000){
-    navigator.vibrate([400,150,400,150,400]);
+  if (sigState === "RED" && now - sigLastVib > 2000){
+    if (vibOn && vibSupported) navigator.vibrate([400,150,400,150,400]);
+    if (now - sigLastVoice > 5000){ sigLastVoice = now; speak("赤です", 95); }
     sigLastVib = now;
   }
   paintSig(true);
@@ -1043,6 +1086,342 @@ function stopSig(){
   if (sessionT0) logEvent("signal_mode_end", "-", NO_DATA, 0);
 }
 $("btnSigStop").onclick = stopSig;
+
+/* ---------- 屋外ナビ(段階3) ----------
+   Nominatimで目的地検索 → Valhalla(歩行者)で経路計算。
+   GPS(watchPosition)+方位(deviceorientationabsolute、移動時はGPS進行方位で補完)。
+   案内符号は方向符号とは独立のモールス文字(単位長2倍・ゆっくり):
+     左折=L(・−・・) 右折=R(・−・) 逸脱=X(−・・−)+修正方向 到着=AR(・−・−・)
+   交差点(案内点)は35mで予告1回、12mで2連提示。逸脱18m超で警告+修正方向。 */
+const NAV_CODES = { L:[1,3,1,1], R:[1,3,1], X:[3,1,1,3], AR:[1,3,1,3,1], B:[3,3] };
+const NAV_OFF_M = 18, NAV_APPROACH_M = 35, NAV_TURN_M = 12, NAV_ARRIVE_M = 15;
+let route = null, navActive = false, navWatch = null;
+let heading = null, lastFix = null, offSince = null, lastOffCue = 0;
+let navCue = null;
+
+const toRad = d => d * Math.PI / 180;
+function gDist(a, b){
+  const dLat = toRad(b.lat-a.lat), dLon = toRad(b.lon-a.lon);
+  const s = Math.sin(dLat/2)**2 +
+    Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(s));
+}
+function gBearing(a, b){
+  const y = Math.sin(toRad(b.lon-a.lon)) * Math.cos(toRad(b.lat));
+  const x = Math.cos(toRad(a.lat))*Math.sin(toRad(b.lat)) -
+            Math.sin(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.cos(toRad(b.lon-a.lon));
+  return (Math.atan2(y, x) * 180/Math.PI + 360) % 360;
+}
+function decodePoly(str){
+  let i = 0, lat = 0, lon = 0; const pts = [];
+  while (i < str.length){
+    for (const k of [0, 1]){
+      let sh = 0, res = 0, b;
+      do { b = str.charCodeAt(i++) - 63; res |= (b & 0x1f) << sh; sh += 5; } while (b >= 0x20);
+      const d = (res & 1) ? ~(res >> 1) : (res >> 1);
+      if (k === 0) lat += d; else lon += d;
+    }
+    pts.push({ lat: lat/1e6, lon: lon/1e6 });
+  }
+  return pts;
+}
+const fmtM = m => m >= 1000 ? (m/1000).toFixed(1) + " km" : Math.round(m) + " m";
+
+function paintNav(msg, sub){
+  for (const id of ["navMain","navHud"]){
+    const el = $(id);
+    el.querySelector(".msg").textContent = msg;
+    el.querySelector(".count").textContent = sub;
+  }
+}
+async function playCue(codes){
+  for (let i = 0; i < codes.length; i++){
+    await playCode(codes[i], MEM_UNIT_MS, "C", 2.0, true);
+    if (i < codes.length-1) await sleep(MEM_UNIT_MS * 2);
+  }
+}
+function pushCue(codes, kind){
+  logEvent("nav_" + kind, "-", NO_DATA, 0);
+  if (NAV_SPEECH[kind]) speak(NAV_SPEECH[kind], kind.startsWith("turn") || kind === "arrive" ? 65 : 45);
+  else if (kind.startsWith("offroute")){
+    const d = kind.split("_")[1];
+    speak("ルートを外れました" + ({L:"。左へ", R:"。右へ", B:"。後ろへ"}[d] || ""), 55);
+  }
+  if (fbRunning) navCue = codes;
+  else playCue(codes);
+}
+
+$("btnDestSearch").onclick = async () => {
+  const q = $("destQ").value.trim();
+  if (!q) return;
+  $("destList").innerHTML = "<div class='note'>検索中…</div>";
+  try{
+    const r = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=3&accept-language=ja&q=" + encodeURIComponent(q));
+    const js = await r.json();
+    if (!js.length){ $("destList").innerHTML = "<div class='note'>見つかりませんでした</div>"; return; }
+    $("destList").innerHTML = "";
+    for (const it of js){
+      const b = document.createElement("button");
+      b.className = "dest";
+      b.textContent = it.display_name;
+      b.onclick = () => setDestination({ lat: +it.lat, lon: +it.lon, name: it.display_name.split(",")[0] });
+      $("destList").appendChild(b);
+    }
+  }catch(e){ $("destList").innerHTML = "<div class='note'>検索失敗: " + e.message + "</div>"; }
+};
+
+function setDestination(dest){
+  $("destList").innerHTML = "";
+  paintNav("経路を計算中…", "—");
+  navigator.geolocation.getCurrentPosition(async pos => {
+    try{
+      const body = {
+        locations: [
+          { lat: pos.coords.latitude, lon: pos.coords.longitude },
+          { lat: dest.lat, lon: dest.lon }
+        ],
+        costing: "pedestrian", units: "kilometers", language: "ja-JP"
+      };
+      const r = await fetch("https://valhalla1.openstreetmap.de/route",
+        { method: "POST", body: JSON.stringify(body) });
+      const js = await r.json();
+      const leg = js.trip.legs[0];
+      const pts = decodePoly(leg.shape);
+      const mans = leg.maneuvers.map(m => ({
+        i: m.begin_shape_index,
+        dir: [9,10,11].includes(m.type) ? "R"
+           : [14,15,16].includes(m.type) ? "L"
+           : [12,13].includes(m.type) ? "B"
+           : [4,5,6].includes(m.type) ? "AR" : null,
+        text: m.instruction, done: 0
+      }));
+      route = { pts, mans, dest, total: js.trip.summary.length * 1000 };
+      $("btnNavStart").disabled = false;
+      paintNav(dest.name + " まで " + fmtM(route.total), "準備完了");
+      log("経路: " + fmtM(route.total) + " / 案内点 " + mans.filter(m => m.dir && m.dir !== "AR").length);
+    }catch(e){ paintNav("経路計算に失敗しました", "—"); log("経路: " + e.message); }
+  }, () => paintNav("現在地を取得できません(位置情報を許可してください)", "—"),
+  { enableHighAccuracy: true, timeout: 10000 });
+}
+
+window.addEventListener("deviceorientationabsolute", e => {
+  if (e.alpha != null) heading = (360 - e.alpha) % 360;
+});
+
+$("btnNavStart").onclick = () => {
+  if (!route) return;
+  navActive = true;
+  $("btnNavStart").disabled = true;
+  $("btnNavStop").disabled = false;
+  for (const m of route.mans) m.done = 0;
+  offSince = null; lastFix = null;
+  if (!sessionT0) sessionT0 = performance.now();
+  logEvent("nav_start", "-", NO_DATA, 0);
+  navWatch = navigator.geolocation.watchPosition(onFix,
+    () => paintNav("GPSを取得できません", "—"),
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 });
+};
+function stopNav(){
+  navActive = false;
+  if (navWatch != null){ navigator.geolocation.clearWatch(navWatch); navWatch = null; }
+  $("btnNavStart").disabled = !route;
+  $("btnNavStop").disabled = true;
+  if (sessionT0) logEvent("nav_end", "-", NO_DATA, 0);
+  paintNav(route ? route.dest.name + "(停止中)" : "目的地未設定", "—");
+}
+$("btnNavStop").onclick = stopNav;
+
+function onFix(pos){
+  if (!navActive || !route) return;
+  const cur = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+  const acc = pos.coords.accuracy || 99;
+  if (lastFix && gDist(lastFix, cur) > 1.5)
+    heading = (pos.coords.speed == null || pos.coords.speed > 0.5)
+      ? gBearing(lastFix, cur) : heading;   // 移動時はGPS進行方位を優先
+  lastFix = cur;
+
+  let ni = 0, nd = Infinity;
+  for (let i = 0; i < route.pts.length; i++){
+    const d = gDist(cur, route.pts[i]);
+    if (d < nd){ nd = d; ni = i; }
+  }
+  let remain = nd;
+  for (let i = ni; i < route.pts.length-1; i++)
+    remain += gDist(route.pts[i], route.pts[i+1]);
+
+  const dGoal = gDist(cur, route.pts[route.pts.length-1]);
+  if (dGoal < NAV_ARRIVE_M){
+    pushCue([NAV_CODES.AR], "arrive");
+    paintNav("到着しました(建物入口・点字ブロックは信号モードの探索をご利用ください)", "0 m");
+    stopNav();
+    return;
+  }
+
+  const now = performance.now();
+  if (nd > NAV_OFF_M){
+    if (!offSince) offSince = now;
+    if (now - offSince > 4000 && now - lastOffCue > 4000){
+      lastOffCue = now;
+      const tb = gBearing(cur, route.pts[ni]);
+      const rel = heading == null ? null : ((tb - heading + 540) % 360) - 180;
+      const dir = rel == null ? null
+        : Math.abs(rel) > 150 ? "B" : rel > 25 ? "R" : rel < -25 ? "L" : null;
+      pushCue(dir ? [NAV_CODES.X, NAV_CODES[dir]] : [NAV_CODES.X], "offroute_" + (dir || "C"));
+      paintNav("ルート逸脱 " + Math.round(nd) + "m" +
+        (dir ? "・" + ({L:"左",R:"右",B:"後方"})[dir] + "へ修正" : ""), "精度±" + Math.round(acc) + "m");
+    }
+    return;
+  }
+  offSince = null;
+
+  let nextMan = null;
+  for (const m of route.mans){
+    if (!m.dir || m.dir === "AR" || m.done >= 2) continue;
+    if (m.i <= ni - 3){ m.done = 2; continue; }   // 通過済み
+    nextMan = m; break;
+  }
+  const sub = "精度±" + Math.round(acc) + "m";
+  if (nextMan){
+    const dm = gDist(cur, route.pts[nextMan.i]);
+    const ja = ({L:"左折", R:"右折", B:"折返し"})[nextMan.dir];
+    if (dm < NAV_TURN_M && nextMan.done < 2){
+      nextMan.done = 2;
+      pushCue([NAV_CODES[nextMan.dir], NAV_CODES[nextMan.dir]], "turn_" + nextMan.dir);
+    }else if (dm < NAV_APPROACH_M && nextMan.done < 1){
+      nextMan.done = 1;
+      pushCue([NAV_CODES[nextMan.dir]], "approach_" + nextMan.dir);
+    }
+    paintNav("残り" + fmtM(remain) + "・" + Math.round(dm) + "m先 " + ja, sub);
+  }else{
+    paintNav("残り " + fmtM(remain), sub);
+  }
+}
+
+/* ---------- 点字ブロック探索(信号モード内・色による簡易検出) ---------- */
+let sigMode = "signal", tenjiLastVib = 0, tenjiState = "NONE";
+$("togTENJI").onclick = e => {
+  sigMode = sigMode === "signal" ? "tenji" : "signal";
+  e.target.classList.toggle("on", sigMode === "tenji");
+  e.target.textContent = "点字ブロック探索: " + (sigMode === "tenji" ? "ON" : "OFF");
+  sigState = "SEARCH"; sigStreak = { k:null, n:0 }; tenjiState = "NONE";
+};
+function tenjiLoop(v, now){
+  const w = 64, h = 48;
+  sigCv.width = w; sigCv.height = h;
+  sigCtx.drawImage(v, 0, v.videoHeight*0.4, v.videoWidth, v.videoHeight*0.6, 0, 0, w, h);
+  const data = sigCtx.getImageData(0, 0, w, h).data;
+  let n = 0, sx = 0;
+  for (let i = 0; i < data.length; i += 4){
+    const r = data[i], g = data[i+1], b = data[i+2];
+    const mx = Math.max(r,g,b), mn = Math.min(r,g,b), d = mx - mn;
+    if (mx < 120 || d < 40) continue;
+    let hue;
+    if (mx === r) hue = ((g-b)/d*60 + 360) % 360;
+    else if (mx === g) hue = (b-r)/d*60 + 120;
+    else hue = (r-g)/d*60 + 240;
+    if (hue >= 35 && hue <= 70){ n++; sx += (i/4) % w; }
+  }
+  let st = "NONE";
+  if (n / (w*h) > 0.03){
+    const cx = sx / n / w;
+    st = cx < 0.4 ? "L" : cx > 0.6 ? "R" : "C";
+  }
+  if (st !== tenjiState){
+    tenjiState = st;
+    logEvent("tenji_" + st, "-", NO_DATA, 0);
+    if (st !== "NONE") speak("点字ブロック、" + ({L:"左", C:"正面", R:"右"})[st], 35);
+  }
+  const stEl = $("sigStatus"), nt = $("sigNote");
+  if (st === "NONE"){
+    stEl.textContent = "点字ブロックを探しています…";
+    stEl.style.color = "var(--dim)";
+    nt.textContent = "カメラをやや下向き(足元前方)に向けてください。黄色の誘導ブロックを検出します。";
+  }else{
+    stEl.textContent = "点字ブロック: " + ({L:"左", C:"正面", R:"右"})[st];
+    stEl.style.color = st === "C" ? "var(--safe)" : "var(--warn)";
+    nt.textContent = "色による簡易検出です。照明条件や黄色以外のブロックでは検出できません。白杖での確認を優先してください。";
+    if (vibOn && vibSupported && now - tenjiLastVib > 1300){
+      tenjiLastVib = now;
+      playCode(st === "C" ? [1] : NAV_CODES[st], UNIT_MS, "C", 1.0, true);
+    }
+  }
+}
+
+/* ---------- 音声出力と注意調停(単一発話の危険ピーク選択) ----------
+   設計思想: 振動モールス=反射的経路(連続・低次)、音声=認知的経路(イベント駆動・高次)。
+   人間の注意調停を模し、複数チャネルの危険度を比較して
+   「その瞬間に最も切迫した1つ」だけを短い音声で出力する。
+   優先度: 停止(100) > 接近体(95/80) > 障害物(70) > 信号赤(95) >
+           通過不可(60) > ナビ(65/45) > 通過可(30) > 計測不能(25) */
+let voiceOn = true, speakPrio = 0, lastSpeakAt = 0;
+function speak(text, prio = 50){
+  if (!voiceOn || !("speechSynthesis" in window)) return;
+  const now = performance.now();
+  if (speechSynthesis.speaking || speechSynthesis.pending){
+    if (prio >= 90 || prio > speakPrio) speechSynthesis.cancel();
+    else return;                        // 低優先は発話中なら破棄(渋滞させない)
+  }else if (now - lastSpeakAt < 900 && prio < 70) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "ja-JP"; u.rate = 1.15;
+  speakPrio = prio;
+  u.onend = () => { speakPrio = 0; };
+  lastSpeakAt = now;
+  speechSynthesis.speak(u);
+  logEvent("voice_" + text, "-", NO_DATA, prio);
+}
+$("togVOICE").onclick = e => {
+  voiceOn = !voiceOn;
+  e.target.classList.toggle("on", voiceOn);
+  e.target.textContent = "音声: " + (voiceOn ? "ON" : "OFF");
+  if (voiceOn) speak("音声を有効にしました", 10);
+  else speechSynthesis.cancel();
+  logEvent("voice_toggle", "-", NO_DATA, 0);
+};
+
+const va = { sector:null, gap:null, dynAt:0, ndAt:0, stopAt:0 };
+setInterval(() => {
+  if (!voiceOn || !xrSession) return;
+  const now = performance.now();
+  /* 1) 停止指示(正面至近)— 最優先 */
+  if (latest.C < NEAR_M){
+    if (now - va.stopAt > 2500){ va.stopAt = now; speak("止まってください", 100); }
+    return;
+  }
+  /* 2) 接近体 */
+  if (dynWarn){
+    if (now - va.dynAt > 2000){
+      va.dynAt = now;
+      speak(({L:"左", C:"正面", R:"右", B:"後方"})[dynWarn.dir] + "から接近", dynWarn.ttc < 1.5 ? 95 : 80);
+    }
+    return;
+  }
+  /* 3) 障害物(最近接セクターの変化時のみ発話) */
+  const d = Math.min(latest.L, latest.C, latest.R);
+  const dir = d < MID_M ? ["L","C","R"][[latest.L, latest.C, latest.R].indexOf(d)] : null;
+  if (dir && dir !== va.sector){
+    va.sector = dir;
+    speak(({L:"左", C:"正面", R:"右"})[dir] + "物体", 70);
+    return;
+  }
+  if (!dir) va.sector = null;
+  /* 4) 通過判定(状態遷移時のみ) */
+  if (gapState.st !== va.gap){
+    const prev = va.gap; va.gap = gapState.st;
+    if (gapState.st === "BLOCK"){ speak("通過できません", 60); return; }
+    if (gapState.st === "PASS" && prev && prev !== "--"){ speak("通過できます", 30); return; }
+    if (gapState.st === "SHIFT"){ speak(gapState.dir === "L" ? "左に開口" : "右に開口", 40); return; }
+  }
+  /* 5) 計測不能 */
+  if (ndOn && noDataSince && now - noDataSince > NODATA_AFTER_MS && now - va.ndAt > 5000){
+    va.ndAt = now;
+    speak("計測できません", 25);
+  }
+}, 300);
+
+const NAV_SPEECH = {
+  approach_L:"まもなく左折", approach_R:"まもなく右折", approach_B:"まもなく折り返し",
+  turn_L:"左折です", turn_R:"右折です", turn_B:"折り返してください", arrive:"到着しました"
+};
 
 /* ---------- PWA ---------- */
 if ("serviceWorker" in navigator){
