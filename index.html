@@ -63,6 +63,10 @@
   .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:none}
   .dot.on{background:var(--safe)} .dot.err{background:var(--danger)}
 
+  .ans{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:4px 0 10px}
+  .ans button{padding:18px 8px;font-size:16px}
+  .ans .code{display:block;font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:3px;letter-spacing:.1em}
+
   details{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
   summary{font-size:13px;color:var(--dim);cursor:pointer}
   #log{font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--dim);
@@ -110,16 +114,52 @@
     <button class="tog" id="btnTest">刺激テスト</button>
   </div>
   <div class="row">
+    <button class="tog on" id="setEANM">符号: E·A·N·M</button>
+    <button class="tog" id="setSKOB">符号: S·K·O·B</button>
+    <button class="tog on" id="togND">無データ通知: ON</button>
+  </div>
+  <div class="row">
     <button class="primary" id="btnAR">計測を開始</button>
   </div>
 
   <details>
+    <summary>弁別テスト(符号セット比較実験)</summary>
+    <div class="row" style="margin-top:10px">
+      <select id="testN">
+        <option value="12">12試行</option>
+        <option value="20" selected>20試行</option>
+        <option value="40">40試行</option>
+      </select>
+      <button class="primary" id="btnTestStart">テスト開始</button>
+    </div>
+    <div id="testRun" style="display:none">
+      <div class="chip" style="justify-content:center;margin:10px 0" id="testProg">— / —</div>
+      <div class="ans">
+        <button data-dir="L">左<span class="code" id="gL"></span></button>
+        <button data-dir="C">正面<span class="code" id="gC"></span></button>
+        <button data-dir="R">右<span class="code" id="gR"></span></button>
+        <button data-dir="B">後方<span class="code" id="gB"></span></button>
+      </div>
+      <div class="row"><button id="btnTestAbort">中止</button></div>
+    </div>
+    <div id="testOut" class="note"></div>
+    <div class="row" id="testDlRow" style="display:none">
+      <button class="primary" id="btnTestCSV">結果CSVダウンロード</button>
+    </div>
+  </details>
+
+  <details>
     <summary>ログ / 符号の意味</summary>
     <div class="note">
-      振動符号(視野内・速いリズム): 左=<b>・−</b> 正面=<b>・</b> 右=<b>−・</b>。近いほど繰り返しが速くなります。<br>
-      記憶警告(視野外・ゆっくり): 左=・− 右=−・ <b>後方=−−</b>。単位長2倍の遅い質感で区別。<br>
-      音モード: 方向を左右パン、距離を音高(近い=高音)で提示。骨伝導イヤホン推奨。<br>
+      符号セット <b>E·A·N·M</b>(緊急度設計): 左=・−(A) 正面=・(E) 右=−・(N) 後方=−−(M)。正面が最短で高速リピート可能。<br>
+      符号セット <b>S·K·O·B</b>(対称案): 左=・・・(S) 正面=−・−(K) 右=−−−(O) 後方=−・・・(B)。<br>
+      いずれも視野内=速いリズム、記憶警告(視野外)=単位長2倍の遅い質感。近いほど繰り返しが速くなります。<br>
+      <b>無データ通知</b>: 深度が約1.5秒以上取得できないとき、ゆっくりした ・・・・(H)を約2秒間隔で提示。「安全(無刺激)」と「計測不能」を弁別可能にします。ON/OFF切替で有無の比較実験ができます。<br>
+      音モード: 方向を左右パン、距離を音高(近い=高音)で提示。骨伝導イヤホン推奨。弁別テスト中はパン・音高の手掛かりを消して符号のみで判定します。<br>
       動作条件: Android + Chrome、ARCore対応機、https配信。ホーム画面に追加すると全画面アプリとして起動できます。
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnWalkCSV">歩行セッションログCSV</button>
     </div>
     <div id="log"></div>
   </details>
@@ -153,8 +193,16 @@ const MEM_EXPIRE_MS = 45000, MEM_MAX = 12, FOV_DEG = 35;
 const UNIT_MS = 70;        // 視野内符号の単位長
 const MEM_UNIT_MS = 140;   // 記憶警告符号の単位長(2倍=遅い質感)
 
-const SECTOR_CODE = { L:[1,3], C:[1], R:[3,1] };
-const MEM_CODE    = { L:[1,3], R:[3,1], B:[3,3] };
+/* 符号セット:
+   EANM = 現行(緊急度設計: 正面E=最短, 頭の1要素で左右系が分岐)
+   SKOB = 正規モールス対称案(左S=・・・ 正面K=−・− 右O=−−− 後方B=−・・・) */
+const CODE_SETS = {
+  EANM: { L:[1,3],     C:[1],     R:[3,1],     B:[3,3] },
+  SKOB: { L:[1,1,1],   C:[3,1,3], R:[3,3,3],   B:[3,1,1,1] }
+};
+let codeSet = "EANM";
+const liveCode = dir => CODE_SETS[codeSet][dir];
+const glyph = units => units.map(u => u === 1 ? "・" : "−").join("");
 
 const $ = id => document.getElementById(id);
 const log = m => { const el=$("log"); el.textContent+=`${new Date().toTimeString().slice(0,8)} ${m}\n`; el.scrollTop=el.scrollHeight; };
@@ -198,15 +246,16 @@ const vibSupported = "vibrate" in navigator;
 $("dotVib").className = "dot " + (vibSupported ? "on" : "err");
 $("stVib").textContent = vibSupported ? "対応" : "非対応";
 
-function beep(ms, dir, dist){
+function beep(ms, dir, dist, neutral){
   if (!sndOn || !audioCtx) return;
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   const pan = audioCtx.createStereoPanner();
-  /* 近い=高音(880Hz)、遠い=低音(440Hz)、後方=低い220Hz */
-  osc.frequency.value = dir === "B" ? 220
+  /* 近い=高音(880Hz)、遠い=低音(440Hz)、後方=低い220Hz。
+     テスト時(neutral)はパン・音高の手掛かりを消し符号のみで判定させる */
+  osc.frequency.value = neutral ? 550 : dir === "B" ? 220
     : 440 + 440 * Math.max(0, Math.min(1, (FAR_M - dist) / FAR_M));
-  pan.pan.value = dir === "L" ? -0.85 : dir === "R" ? 0.85 : 0;
+  pan.pan.value = neutral ? 0 : dir === "L" ? -0.85 : dir === "R" ? 0.85 : 0;
   gain.gain.value = 0.25;
   osc.connect(gain).connect(pan).connect(audioCtx.destination);
   osc.start();
@@ -214,14 +263,31 @@ function beep(ms, dir, dist){
 }
 
 /* 符号列を振動+音で再生し、所要時間だけ待つ */
-async function playCode(units, unitMs, dir, dist){
+async function playCode(units, unitMs, dir, dist, neutral){
   const seq = [];
   units.forEach((u,i) => { seq.push(u*unitMs); if (i < units.length-1) seq.push(unitMs); });
   if (vibOn && vibSupported) navigator.vibrate(seq);
   for (let i = 0; i < units.length; i++){
-    beep(units[i]*unitMs, dir, dist);
+    beep(units[i]*unitMs, dir, dist, neutral);
     await sleep(units[i]*unitMs + (i < units.length-1 ? unitMs : 0));
   }
+}
+
+const NODATA_CODE = [1,1,1,1];     // ・・・・(H) 計測不能通知
+const NODATA_AFTER_MS = 1500;      // この時間、深度が取れなければ通知開始
+const NODATA_REPEAT_MS = 1800;     // 通知の繰り返し間隔
+let ndOn = true;                   // 無データ通知の有効/無効(実験条件)
+let lastFrameAt = 0, noDataSince = null;
+
+/* 歩行セッションログ: 提示イベントを全記録(曝露量・タイミング分析用) */
+let sessionLog = [], sessionT0 = 0;
+function logEvent(kind, dir, dist, unit){
+  sessionLog.push({
+    t: sessionT0 ? Math.round(performance.now() - sessionT0) : 0,
+    kind, dir,
+    dist: (typeof dist === "number" && dist < NO_DATA) ? dist.toFixed(2) : "",
+    set: codeSet, nd: ndOn ? 1 : 0, unit
+  });
 }
 
 async function feedbackLoop(){
@@ -232,7 +298,8 @@ async function feedbackLoop(){
     const live = d < FAR_M;
     if (live){
       const dir = ["L","C","R"][[latest.L, latest.C, latest.R].indexOf(d)];
-      await playCode(SECTOR_CODE[dir], UNIT_MS, dir, d);
+      await playCode(liveCode(dir), UNIT_MS, dir, d);
+      logEvent("live", dir, d, UNIT_MS);
       let gap;
       if (d < NEAR_M) gap = 150;
       else if (d < MID_M) gap = 150 + (d-NEAR_M)/(MID_M-NEAR_M)*350;
@@ -242,10 +309,20 @@ async function feedbackLoop(){
     const w = memWarn;
     if (w){
       await sleep(200);
-      await playCode(MEM_CODE[w.dir], MEM_UNIT_MS, w.dir, w.dist);
+      await playCode(liveCode(w.dir), MEM_UNIT_MS, w.dir, w.dist);
+      logEvent("mem", w.dir, w.dist, MEM_UNIT_MS);
       await sleep(w.dist < 1.5 ? 400 : 900);
     }
-    if (!live && !w) await sleep(120);
+    if (!live && !w){
+      const now = performance.now();
+      const stale = xrSession && now - lastFrameAt > NODATA_AFTER_MS;
+      const persist = noDataSince && now - noDataSince > NODATA_AFTER_MS;
+      if (ndOn && xrSession && (stale || persist)){
+        await playCode(NODATA_CODE, MEM_UNIT_MS, "C", NO_DATA, true);
+        logEvent("nodata", "-", NO_DATA, MEM_UNIT_MS);
+        await sleep(NODATA_REPEAT_MS);
+      } else await sleep(120);
+    }
   }
 }
 function stopFeedback(){ fbRunning = false; if (vibSupported) navigator.vibrate(0); }
@@ -264,13 +341,32 @@ $("togSnd").onclick = e => {
   e.target.classList.toggle("on", sndOn);
   e.target.textContent = "音: " + (sndOn ? "ON" : "OFF");
 };
+$("togND").onclick = e => {
+  ndOn = !ndOn;
+  e.target.classList.toggle("on", ndOn);
+  e.target.textContent = "無データ通知: " + (ndOn ? "ON" : "OFF");
+  logEvent("nd_toggle", "-", NO_DATA, 0);
+  log("無データ通知: " + (ndOn ? "ON" : "OFF"));
+};
+$("btnWalkCSV").onclick = () => {
+  if (!sessionLog.length){ log("ログが空です(計測を開始すると記録されます)"); return; }
+  const rows = ["t_ms,kind,dir,dist_m,code_set,nodata_signal,unit_ms"];
+  for (const r of sessionLog)
+    rows.push([r.t, r.kind, r.dir, r.dist, r.set, r.nd, r.unit].join(","));
+  const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "okimo_walklog_" +
+    new Date().toISOString().slice(0,19).replace(/[:T]/g,"-") + ".csv";
+  a.click();
+};
+
 $("btnTest").onclick = async () => {
   if (sndOn && !audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  log("テスト: 左→正面→右→後方(記憶)");
-  for (const [dir, code, unit, dist] of
-       [["L",SECTOR_CODE.L,UNIT_MS,1.0], ["C",SECTOR_CODE.C,UNIT_MS,1.0],
-        ["R",SECTOR_CODE.R,UNIT_MS,1.0], ["B",MEM_CODE.B,MEM_UNIT_MS,1.5]]){
-    await playCode(code, unit, dir, dist);
+  log(`テスト(${codeSet}): 左→正面→右→後方→無データ通知`);
+  for (const [dir, unit] of [["L",UNIT_MS],["C",UNIT_MS],["R",UNIT_MS],["B",MEM_UNIT_MS],["ND",MEM_UNIT_MS]]){
+    await playCode(dir === "ND" ? NODATA_CODE : liveCode(dir), unit,
+                   dir === "ND" ? "C" : dir, 1.2, dir === "ND");
     await sleep(500);
   }
 };
@@ -333,6 +429,11 @@ $("btnAR").onclick = async () => {
     document.body.classList.add("in-ar");
     setXR(true, "計測中");
     log("XR: 開始 format=" + xrSession.depthDataFormat);
+    sessionT0 = performance.now();
+    sessionLog = [];
+    lastFrameAt = performance.now();
+    noDataSince = null;
+    logEvent("session_start", "-", NO_DATA, 0);
     feedbackLoop();
 
     const canvas = document.createElement("canvas");
@@ -344,6 +445,7 @@ $("btnAR").onclick = async () => {
       xrSession = null;
       document.body.classList.remove("in-ar");
       stopFeedback();
+      logEvent("session_end", "-", NO_DATA, 0);
       latest = { L:NO_DATA, C:NO_DATA, R:NO_DATA };
       memWarn = null;
       setXR(false, "終了");
@@ -360,6 +462,10 @@ $("btnAR").onclick = async () => {
       if (!depth) return;
       const { L, C, R, closest } = measureSectors(depth);
       latest = { L, C, R };
+      lastFrameAt = performance.now();
+      if (L >= NO_DATA && C >= NO_DATA && R >= NO_DATA){
+        if (!noDataSince) noDataSince = lastFrameAt;
+      } else noDataSince = null;
       if (closest && closest.d < MEM_DETECT_M) remember(unproject(view, closest.u, closest.v, closest.d));
       memWarn = checkMemory(view);
       paintSector(0,L); paintSector(1,C); paintSector(2,R);
@@ -403,6 +509,109 @@ function measureSectors(depth){
   }
   return { L:out.L, C:out.C, R:out.R, closest };
 }
+
+/* ---------- 符号セット切替 ---------- */
+function applySet(name){
+  codeSet = name;
+  $("setEANM").classList.toggle("on", name === "EANM");
+  $("setSKOB").classList.toggle("on", name === "SKOB");
+  for (const d of ["L","C","R","B"]) $("g"+d).textContent = glyph(liveCode(d));
+  log("符号セット: " + name);
+}
+$("setEANM").onclick = () => applySet("EANM");
+$("setSKOB").onclick = () => applySet("SKOB");
+
+/* ---------- 弁別テスト(4方向強制選択・反応時間記録) ---------- */
+const test = { running:false, seq:[], idx:0, t0:0, awaiting:false, rows:[] };
+const DIRS = ["L","C","R","B"];
+
+$("btnTestStart").onclick = async () => {
+  if (test.running) return;
+  if (sndOn && !audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const n = parseInt($("testN").value);
+  /* 4方向を等頻度でランダム化(ブロックシャッフル) */
+  test.seq = [];
+  for (let b = 0; b < n/4; b++){
+    const blk = [...DIRS];
+    for (let i = blk.length-1; i > 0; i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [blk[i], blk[j]] = [blk[j], blk[i]];
+    }
+    test.seq.push(...blk);
+  }
+  test.rows = []; test.idx = 0; test.running = true;
+  for (const d of ["L","C","R","B"]) $("g"+d).textContent = glyph(liveCode(d));
+  $("testRun").style.display = "block";
+  $("testOut").textContent = "";
+  $("testDlRow").style.display = "none";
+  runTrial();
+};
+
+async function runTrial(){
+  if (!test.running) return;
+  if (test.idx >= test.seq.length){ finishTest(); return; }
+  test.awaiting = false;
+  $("testProg").textContent = `${test.idx+1} / ${test.seq.length}`;
+  await sleep(800 + Math.random()*900);   // 予期を防ぐランダム間隔
+  if (!test.running) return;
+  const dir = test.seq[test.idx];
+  const unit = dir === "B" ? MEM_UNIT_MS : UNIT_MS;  // 実運用と同じ時間構造
+  test.t0 = performance.now();            // RTは刺激開始から
+  test.awaiting = true;
+  playCode(liveCode(dir), unit, dir, 1.2, true);     // neutral=方向手掛かりなし
+}
+
+document.querySelectorAll(".ans button").forEach(btn => {
+  btn.onclick = () => {
+    if (!test.running || !test.awaiting) return;
+    test.awaiting = false;
+    const rt = Math.round(performance.now() - test.t0);
+    const presented = test.seq[test.idx];
+    const response = btn.dataset.dir;
+    const correct = presented === response;
+    test.rows.push({ trial: test.idx+1, set: codeSet, presented, response,
+                     correct, rt,
+                     unit: presented === "B" ? MEM_UNIT_MS : UNIT_MS });
+    $("testProg").textContent = correct ? "○ 正解" : `× 不正解(正: ${DIRJA[presented]})`;
+    if (vibSupported && !correct) navigator.vibrate([40,60,40]);  // 誤答のみ短いブザー
+    test.idx++;
+    setTimeout(runTrial, 700);
+  };
+});
+
+$("btnTestAbort").onclick = () => { test.running = false; $("testRun").style.display = "none"; };
+
+function finishTest(){
+  test.running = false;
+  $("testRun").style.display = "none";
+  const n = test.rows.length;
+  const ok = test.rows.filter(r => r.correct);
+  const acc = (100 * ok.length / n).toFixed(1);
+  const mrt = ok.length ? Math.round(ok.reduce((s,r) => s+r.rt, 0) / ok.length) : 0;
+  let byDir = "";
+  for (const d of DIRS){
+    const sub = test.rows.filter(r => r.presented === d);
+    const subOk = sub.filter(r => r.correct).length;
+    byDir += `${DIRJA[d]} ${subOk}/${sub.length} `;
+  }
+  $("testOut").innerHTML =
+    `<b>結果(${codeSet})</b>: 正答率 ${acc}%(${ok.length}/${n})、` +
+    `正答時平均反応時間 ${mrt} ms<br>方向別: ${byDir}`;
+  $("testDlRow").style.display = "flex";
+  log(`弁別テスト完了 ${codeSet}: ${acc}% / ${mrt}ms`);
+}
+
+$("btnTestCSV").onclick = () => {
+  const rows = ["trial,code_set,presented,response,correct,rt_ms,unit_ms"];
+  for (const r of test.rows)
+    rows.push([r.trial, r.set, r.presented, r.response, r.correct ? 1 : 0, r.rt, r.unit].join(","));
+  const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `okimo_discrim_${codeSet}_` +
+    new Date().toISOString().slice(0,19).replace(/[:T]/g,"-") + ".csv";
+  a.click();
+};
 
 /* ---------- PWA ---------- */
 if ("serviceWorker" in navigator){
